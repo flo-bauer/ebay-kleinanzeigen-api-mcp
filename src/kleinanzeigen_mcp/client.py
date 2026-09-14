@@ -146,10 +146,126 @@ class KleinanzeigenClient:
     async def _extract_listings_from_page(self, page: Page) -> List[ListingSummary]:
         """Extract listing data from a search results page."""
         try:
-            items = await page.query_selector_all(".ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp)")
             results = []
             
-            for item in items:
+            # Try new frontend first (article elements with JSON-LD)
+            articles = await page.query_selector_all("article")
+            if articles:
+                logger.info(f"Found {len(articles)} articles (new frontend)")
+                results = await self._extract_from_new_frontend(page, articles)
+            
+            # Fallback to old frontend (ad-listitem elements)
+            if not results:
+                items = await page.query_selector_all(".ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp)")
+                if items:
+                    logger.info(f"Found {len(items)} ad-listitems (old frontend)")
+                    results = await self._extract_from_old_frontend(page, items)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Failed to extract listings from page: {e}")
+            return []
+
+    async def _extract_from_new_frontend(self, page: Page, articles) -> List[ListingSummary]:
+        """Extract listings from new React/Astro frontend (article elements)."""
+        results = []
+        import json
+        import re
+        
+        for article in articles:
+            try:
+                # Get the link element
+                link_element = await article.query_selector("a[href*='/s-anzeige/']")
+                if not link_element:
+                    continue
+                    
+                href = await link_element.get_attribute("href")
+                if not href:
+                    continue
+                
+                # Extract adid from URL like /s-anzeige/buerostuhl-schwarz-stoff/3509249072-93-8684
+                adid_match = re.search(r'/s-anzeige/[^/]+/(\d+)', href)
+                if not adid_match:
+                    continue
+                adid = adid_match.group(1)
+                
+                # Extract title from JSON-LD script
+                title_text = ""
+                script_elements = await article.query_selector_all("script[type='application/ld+json']")
+                for script in script_elements:
+                    try:
+                        script_content = await script.inner_text()
+                        data = json.loads(script_content)
+                        if data.get("@type") == "ImageObject" and data.get("title"):
+                            title_text = data["title"]
+                            break
+                    except:
+                        continue
+                
+                # Fallback: try to get title from link text or alt text
+                if not title_text:
+                    title_text = await link_element.inner_text()
+                    title_text = title_text.strip()
+                
+                # Extract price - look for price text in the article
+                price_text = ""
+                article_text = await article.inner_text()
+                # Look for price pattern like "50 €" or "50€" or "VB"
+                price_match = re.search(r'(\d[\d\.]*)\s*€', article_text)
+                if price_match:
+                    price_text = price_match.group(1).replace(".", "")
+                elif "VB" in article_text:
+                    price_text = "VB"
+                
+                # Extract description from JSON-LD
+                description_text = ""
+                for script in script_elements:
+                    try:
+                        script_content = await script.inner_text()
+                        data = json.loads(script_content)
+                        if data.get("@type") == "ImageObject" and data.get("description"):
+                            description_text = data["description"][:500]  # Limit length
+                            break
+                    except:
+                        continue
+                
+                # Extract images from the article
+                images = []
+                img_elements = await article.query_selector_all("img")
+                for img in img_elements:
+                    src = await img.get_attribute("src")
+                    if src and src.startswith("http"):
+                        images.append(src)
+                    elif src and src.startswith("//"):
+                        images.append("https:" + src)
+                    elif src and src.startswith("/"):
+                        images.append(self.base_url + src)
+
+                if not title_text:
+                    continue
+
+                full_url = f"{self.base_url}{href}"
+                results.append(ListingSummary(
+                    adid=adid,
+                    url=full_url,
+                    title=title_text,
+                    price=price_text,
+                    description=description_text,
+                    images=images,
+                ))
+            except Exception as e:
+                logger.debug(f"Failed to extract article: {e}")
+                continue
+        
+        return results
+
+    async def _extract_from_old_frontend(self, page: Page, items) -> List[ListingSummary]:
+        """Extract listings from old legacy frontend (ad-listitem elements)."""
+        results = []
+        
+        for item in items:
+            try:
                 article = await item.query_selector("article")
                 if not article:
                     continue
@@ -172,6 +288,18 @@ class KleinanzeigenClient:
                 desc_element = await article.query_selector("p.aditem-main--middle--description")
                 description_text = await desc_element.inner_text() if desc_element else ""
                 
+                # Extract images from the article
+                images = []
+                img_elements = await article.query_selector_all("img")
+                for img in img_elements:
+                    src = await img.get_attribute("src")
+                    if src and src.startswith("http"):
+                        images.append(src)
+                    elif src and src.startswith("//"):
+                        images.append("https:" + src)
+                    elif src and src.startswith("/"):
+                        images.append(self.base_url + src)
+
                 if data_adid and data_href:
                     full_url = f"{self.base_url}{data_href}"
                     results.append(ListingSummary(
@@ -179,15 +307,15 @@ class KleinanzeigenClient:
                         url=full_url,
                         title=title_text,
                         price=price_text,
-                        description=description_text
+                        description=description_text,
+                        images=images,
                     ))
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Failed to extract listings from page: {e}")
-            return []
-    
+            except Exception as e:
+                logger.debug(f"Failed to extract old frontend item: {e}")
+                continue
+        
+        return results
+
     async def get_listing_details(self, listing_id: str) -> ListingDetails:
         """
         Fetch complete details for a specific listing.

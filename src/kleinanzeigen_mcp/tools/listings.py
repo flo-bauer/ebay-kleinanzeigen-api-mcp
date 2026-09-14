@@ -219,6 +219,13 @@ async def _search_listings_impl(
                     desc = listing.description[:100] + "..." if len(listing.description) > 100 else listing.description
                     output_lines.append(f"   Description: {desc}")
                 output_lines.append(f"   URL: {listing.url}")
+                # Include images if available
+                if listing.images:
+                    output_lines.append(f"   Images ({len(listing.images)}):")
+                    for img_idx, img_url in enumerate(listing.images[:3], 1):
+                        output_lines.append(f"     {img_idx}. {img_url}")
+                    if len(listing.images) > 3:
+                        output_lines.append(f"     ... and {len(listing.images) - 3} more")
                 output_lines.append("")
             
             return "\n".join(output_lines)
