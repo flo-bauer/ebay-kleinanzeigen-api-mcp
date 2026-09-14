@@ -144,177 +144,106 @@ class KleinanzeigenClient:
             await context.close()
     
     async def _extract_listings_from_page(self, page: Page) -> List[ListingSummary]:
-        """Extract listing data from a search results page."""
+        """Bulletproof extraction using browser-side JavaScript."""
         try:
+            # 1. Kurz warten, bis das JavaScript der Webseite geladen ist
+            await page.wait_for_timeout(2000)
+            
+            # 2. Wir führen die Extraktion synchron als JavaScript im Browser aus.
+            # Das verhindert Fehler durch nachträgliches Rendern der Elemente.
+            js_script = r"""
+            () => {
+                const results = [];
+                // Wir suchen nach alten UND neuen Frontend-Klassen
+                const elements = document.querySelectorAll('.ad-listitem, article');
+                
+                elements.forEach(el => {
+                    try {
+                        const link = el.querySelector('a[href*="/s-anzeige/"]');
+                        if (!link) return;
+                        
+                        const href = link.getAttribute('href');
+                        
+                        // ID finden
+                        let adid = el.getAttribute('data-adid');
+                        if (!adid) {
+                            const match = href.match(/\d{8,}/);
+                            adid = match ? match[0] : 'unknown';
+                        }
+                        
+                        // Titel finden (Link-Text, H2, oder Notfall-Fallback)
+                        let title = link.innerText.trim();
+                        if (!title || title.length < 3) {
+                            const h2 = el.querySelector('h2');
+                            title = h2 ? h2.innerText.trim() : '';
+                        }
+                        if (!title || title.length < 3) {
+                            title = 'Titel unbekannt';
+                        }
+                        
+                        // Preis finden (Filtert auch nervige Sonderzeichen wie Ôé¼)
+                        const text = el.innerText || '';
+                        const priceMatch = text.match(/(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*(?:€|EUR|Ôé¼)|VB|Zu verschenken/i);
+                        const price = priceMatch ? priceMatch[0].replace('EUR', '€').replace('Ôé¼', '€') : 'Preis auf Anfrage';
+                        
+                        // Bilder finden
+                        const imgs = Array.from(el.querySelectorAll('img'))
+                            .map(img => img.getAttribute('src') || img.getAttribute('data-imgsrc'))
+                            .filter(src => src && (src.includes('http') || src.startsWith('//')));
+                            
+                        results.push({
+                            adid: adid,
+                            href: href,
+                            title: title,
+                            price: price,
+                            images: imgs
+                        });
+                    } catch (e) {
+                        // Einzelfehler leise ignorieren, damit der Rest weiterläuft
+                    }
+                });
+                
+                // Duplikate filtern (falls <article> in .ad-listitem verschachtelt ist)
+                const unique = [];
+                const seen = new Set();
+                for (const r of results) {
+                    if (!seen.has(r.adid)) {
+                        seen.add(r.adid);
+                        unique.push(r);
+                    }
+                }
+                return unique;
+            }
+            """
+            
+            # JS direkt im Browser ausführen
+            raw_results = await page.evaluate(js_script)
+            logger.info(f"JS Extraktion fand {len(raw_results)} eindeutige Inserate")
+            
+            # In saubere Python-Objekte umwandeln
             results = []
-            
-            # Try new frontend first (article elements with JSON-LD)
-            articles = await page.query_selector_all("article")
-            if articles:
-                logger.info(f"Found {len(articles)} articles (new frontend)")
-                results = await self._extract_from_new_frontend(page, articles)
-            
-            # Fallback to old frontend (ad-listitem elements)
-            if not results:
-                items = await page.query_selector_all(".ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp)")
-                if items:
-                    logger.info(f"Found {len(items)} ad-listitems (old frontend)")
-                    results = await self._extract_from_old_frontend(page, items)
-            
+            for item in raw_results:
+                full_url = item['href'] if item['href'].startswith("http") else f"{self.base_url}{item['href']}"
+                
+                # Fehlende "https:" bei URLs reparieren
+                images = []
+                for img in item['images']:
+                    images.append("https:" + img if img.startswith("//") else img)
+                        
+                results.append(ListingSummary(
+                    adid=item['adid'],
+                    url=full_url,
+                    title=item['title'],
+                    price=item['price'],
+                    description="",
+                    images=images
+                ))
+                
             return results
             
         except Exception as e:
-            logger.error(f"Failed to extract listings from page: {e}")
+            logger.error(f"Fehler bei JS Extraktion: {e}")
             return []
-
-    async def _extract_from_new_frontend(self, page: Page, articles) -> List[ListingSummary]:
-        """Extract listings from new React/Astro frontend (article elements)."""
-        results = []
-        import json
-        import re
-        
-        for article in articles:
-            try:
-                # Get the link element
-                link_element = await article.query_selector("a[href*='/s-anzeige/']")
-                if not link_element:
-                    continue
-                    
-                href = await link_element.get_attribute("href")
-                if not href:
-                    continue
-                
-                # Extract adid from URL like /s-anzeige/buerostuhl-schwarz-stoff/3509249072-93-8684
-                adid_match = re.search(r'/s-anzeige/[^/]+/(\d+)', href)
-                if not adid_match:
-                    continue
-                adid = adid_match.group(1)
-                
-                # Extract title from JSON-LD script
-                title_text = ""
-                script_elements = await article.query_selector_all("script[type='application/ld+json']")
-                for script in script_elements:
-                    try:
-                        script_content = await script.inner_text()
-                        data = json.loads(script_content)
-                        if data.get("@type") == "ImageObject" and data.get("title"):
-                            title_text = data["title"]
-                            break
-                    except:
-                        continue
-                
-                # Fallback: try to get title from link text or alt text
-                if not title_text:
-                    title_text = await link_element.inner_text()
-                    title_text = title_text.strip()
-                
-                # Extract price - look for price text in the article
-                price_text = ""
-                article_text = await article.inner_text()
-                # Look for price pattern like "50 €" or "50€" or "VB"
-                price_match = re.search(r'(\d[\d\.]*)\s*€', article_text)
-                if price_match:
-                    price_text = price_match.group(1).replace(".", "")
-                elif "VB" in article_text:
-                    price_text = "VB"
-                
-                # Extract description from JSON-LD
-                description_text = ""
-                for script in script_elements:
-                    try:
-                        script_content = await script.inner_text()
-                        data = json.loads(script_content)
-                        if data.get("@type") == "ImageObject" and data.get("description"):
-                            description_text = data["description"][:500]  # Limit length
-                            break
-                    except:
-                        continue
-                
-                # Extract images from the article
-                images = []
-                img_elements = await article.query_selector_all("img")
-                for img in img_elements:
-                    src = await img.get_attribute("src")
-                    if src and src.startswith("http"):
-                        images.append(src)
-                    elif src and src.startswith("//"):
-                        images.append("https:" + src)
-                    elif src and src.startswith("/"):
-                        images.append(self.base_url + src)
-
-                if not title_text:
-                    continue
-
-                full_url = f"{self.base_url}{href}"
-                results.append(ListingSummary(
-                    adid=adid,
-                    url=full_url,
-                    title=title_text,
-                    price=price_text,
-                    description=description_text,
-                    images=images,
-                ))
-            except Exception as e:
-                logger.debug(f"Failed to extract article: {e}")
-                continue
-        
-        return results
-
-    async def _extract_from_old_frontend(self, page: Page, items) -> List[ListingSummary]:
-        """Extract listings from old legacy frontend (ad-listitem elements)."""
-        results = []
-        
-        for item in items:
-            try:
-                article = await item.query_selector("article")
-                if not article:
-                    continue
-                
-                data_adid = await article.get_attribute("data-adid")
-                data_href = await article.get_attribute("data-href")
-                
-                # Extract title
-                title_element = await article.query_selector("h2.text-module-begin a.ellipsis")
-                title_text = await title_element.inner_text() if title_element else ""
-                
-                # Extract price
-                price_element = await article.query_selector("p.aditem-main--middle--price-shipping--price")
-                price_text = ""
-                if price_element:
-                    price_text = await price_element.inner_text()
-                    price_text = price_text.replace("€", "").replace("VB", "").replace(".", "").strip()
-                
-                # Extract description
-                desc_element = await article.query_selector("p.aditem-main--middle--description")
-                description_text = await desc_element.inner_text() if desc_element else ""
-                
-                # Extract images from the article
-                images = []
-                img_elements = await article.query_selector_all("img")
-                for img in img_elements:
-                    src = await img.get_attribute("src")
-                    if src and src.startswith("http"):
-                        images.append(src)
-                    elif src and src.startswith("//"):
-                        images.append("https:" + src)
-                    elif src and src.startswith("/"):
-                        images.append(self.base_url + src)
-
-                if data_adid and data_href:
-                    full_url = f"{self.base_url}{data_href}"
-                    results.append(ListingSummary(
-                        adid=data_adid,
-                        url=full_url,
-                        title=title_text,
-                        price=price_text,
-                        description=description_text,
-                        images=images,
-                    ))
-            except Exception as e:
-                logger.debug(f"Failed to extract old frontend item: {e}")
-                continue
-        
-        return results
 
     async def get_listing_details(self, listing_id: str) -> ListingDetails:
         """

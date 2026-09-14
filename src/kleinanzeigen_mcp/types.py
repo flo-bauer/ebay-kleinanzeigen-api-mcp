@@ -22,6 +22,7 @@ class ListingSummary:
     title: str
     price: str
     description: str
+    images: list = None
 
 
 @dataclass
