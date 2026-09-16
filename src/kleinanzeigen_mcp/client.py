@@ -346,12 +346,43 @@ class KleinanzeigenClient:
             description = re.sub(r'\n+', '\n', description)
         
         # Extract images
-        images = []
-        image_elements = await page.query_selector_all("#viewad-image img")
-        for img in image_elements:
-            src = await img.get_attribute("src")
-            if src:
-                images.append(src)
+        images = await page.evaluate(r"""
+            () => {
+                // 1. Suche nur im Haupt-Inserat, nicht in "Ähnliche Anzeigen"
+                const selectors = '#viewad-image img, #viewad-product-gallery img, #viewad-slider img, .galleryimage-element img';
+                let imgs = Array.from(document.querySelectorAll(selectors));
+                
+                // Fallback für veränderte Layouts
+                if (imgs.length === 0) {
+                    const mainContainer = document.querySelector('article') || document.querySelector('#viewad-main');
+                    if (mainContainer) {
+                        imgs = Array.from(mainContainer.querySelectorAll('img[src*="prod-ads"]'));
+                    }
+                }
+
+                const uniqueImages = new Map();
+                
+                imgs.forEach(img => {
+                    const src = img.getAttribute('src') || img.getAttribute('data-imgsrc') || img.getAttribute('data-src');
+                    
+                    if (src && (src.includes('http') || src.startsWith('//')) && src.includes('prod-ads')) {
+                        const fullUrl = src.startsWith('//') ? 'https:' + src : src;
+                        
+                        // 2. Extrahiere die eindeutige Bild-ID (UUID)
+                        const match = fullUrl.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+                        
+                        if (match) {
+                            const uuid = match[1];
+                            // 3. Fordere das Bild im größtmöglichen Format an ($_59.AUTO)
+                            const largeUrl = fullUrl.replace(/\$_\d+\.AUTO/i, '$_59.AUTO');
+                            uniqueImages.set(uuid, largeUrl);
+                        }
+                    }
+                });
+                
+                return Array.from(uniqueImages.values());
+            }
+        """)
         
         # Extract shipping info
         shipping = None
