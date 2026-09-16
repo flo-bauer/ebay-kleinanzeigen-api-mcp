@@ -301,7 +301,7 @@ def create_sse_server():
                         "properties": {
                             "listing_url": {
                                 "type": "string",
-                                "description": "URL des Inserats auf eBay Kleinanzeigen"
+                                "description": "URL of the listing on eBay Kleinanzeigen"
                             }
                         },
                         "required": ["listing_url"]
@@ -314,14 +314,14 @@ def create_sse_server():
                 "tools": [
                     {
                         "name": "search_listings",
-                        "description": "Suche nach Inseraten auf eBay Kleinanzeigen",
+                        "description": "Search for listings on eBay Kleinanzeigen",
                         "inputSchema": {
                             "$ref": "#/components/schemas/SearchListingsRequest"
                         }
                     },
                     {
                         "name": "get_listing_details",
-                        "description": "Hole detaillierte Informationen zu einem spezifischen Inserat",
+                        "description": "Get detailed information for a specific listing",
                         "inputSchema": {
                             "$ref": "#/components/schemas/GetListingDetailsRequest"
                         }
@@ -330,15 +330,15 @@ def create_sse_server():
                 "prompts": [
                     {
                         "name": "find_deals",
-                        "description": "Finde die besten Angebote basierend auf Suchkriterien"
+                        "description": "Find the best deals based on search criteria"
                     },
                     {
                         "name": "compare_listings",
-                        "description": "Vergleiche mehrere ähnliche Inserate"
+                        "description": "Compare multiple similar listings"
                     },
                     {
                         "name": "monitor_search",
-                        "description": "Überwache eine Suche auf neue Angebote"
+                        "description": "Monitor a search for new listings"
                     }
                 ]
             }

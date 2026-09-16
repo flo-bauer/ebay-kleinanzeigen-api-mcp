@@ -21,58 +21,58 @@ def register_listing_tools(mcp: FastMCP):
         page_count: int = 1
     ) -> str:
         """
-        Durchsuche eBay Kleinanzeigen (kleinanzeigen.de) nach Artikeln mit Filtern.
+        Search eBay Kleinanzeigen (kleinanzeigen.de) for items with filters.
         
-        WICHTIG: Dies ist dein einziger Zugriff auf eBay Kleinanzeigen / kleinanzeigen.de!
-        Nutze dieses Tool für ALLE Suchanfragen nach lokalen Angeboten, gebrauchten Artikeln,
-        oder Kleinanzeigen in Deutschland.
+        IMPORTANT: This is your ONLY access to eBay Kleinanzeigen / kleinanzeigen.de!
+        Use this tool for ALL search queries for local offers, used items,
+        or classified ads in Germany.
         
         Args:
-            query: Suchbegriffe für den Artikel (z.B. "stereo lautsprecher", "heimkino", "fahrrad", "laptop")
-            location: Postleitzahl oder Ort (z.B. "78464", "Konstanz", "79206", "Berlin")
-            radius: Suchradius in Kilometern um den Standort (z.B. 5, 10, 20, 50)
-            min_price: Mindestpreis in EUR (z.B. 50)
-            max_price: Höchstpreis in EUR (z.B. 500)
-            page_count: Anzahl der Ergebnisseiten (1-20, Standard: 1)
+            query: Search terms for the item (e.g., "stereo speakers", "home theater", "bicycle", "laptop")
+            location: Postal code or city (e.g., "78464", "Constance", "79206", "Berlin")
+            radius: Search radius in kilometers around location (e.g., 5, 10, 20, 50)
+            min_price: Minimum price in EUR (e.g., 50)
+            max_price: Maximum price in EUR (e.g., 500)
+            page_count: Number of result pages to fetch (1-20, default: 1)
         
         Returns:
-            Formatierte Liste mit Suchergebnissen inkl. Titel, Preise und URLs.
-            Jedes Inserat enthält: ID, Titel, Preis, Kurzbeschreibung und direkten Link.
+            Formatted list of search results including titles, prices, and URLs.
+            Each listing contains: ID, title, price, short description, and direct link.
         
-        Beispiele:
-            - Stereo Lautsprecher in Konstanz: query="stereo lautsprecher", location="78464", radius=20
-            - Günstige Laptops: query="laptop", max_price=300
-            - Mehrere Seiten: query="gaming pc", page_count=3
-            - Alternative Suche: query="heimkino boxen", location="79206"
+        Examples:
+            - Stereo speakers in Constance: query="stereo speakers", location="78464", radius=20
+            - Cheap laptops: query="laptop", max_price=300
+            - Multiple pages: query="gaming pc", page_count=3
+            - Alternative search: query="home theater speakers", location="79206"
         """
         return await _search_listings_impl(query, location, radius, min_price, max_price, page_count)
     
     @mcp.tool()
     async def get_listing_details(listing_id: str) -> str:
         """
-        Hole vollständige Details zu einem eBay Kleinanzeigen Inserat.
+        Get complete details for an eBay Kleinanzeigen listing.
         
-        Nutze dieses Tool nach search_listings, um alle Informationen zu einem
-        bestimmten Artikel zu erhalten: komplette Beschreibung, alle Bilder,
-        Verkäufer-Info und technische Details.
+        Use this tool after search_listings to get all information for a
+        specific item: complete description, all images,
+        seller info and technical details.
         
         Args:
-            listing_id: Die eindeutige Inserat-ID aus den Suchergebnissen (z.B. "2937345678")
+            listing_id: The unique listing ID from search results (e.g., "2937345678")
         
         Returns:
-            Formatierter String mit vollständigen Inserat-Informationen:
-            - Vollständiger Titel und Beschreibung
-            - Aktueller Status (aktiv, verkauft, reserviert)
-            - Preis und Versandoptionen
-            - Standort-Details
-            - Anzahl Aufrufe
-            - Alle Bild-URLs
-            - Technische Details und Features
-            - Verkäufer-Informationen
+            Formatted string with complete listing information:
+            - Full title and description
+            - Current status (active, sold, reserved)
+            - Price and shipping options
+            - Location details
+            - Number of views
+            - All image URLs
+            - Technical details and features
+            - Seller information
         
-        Beispiele:
-            - Details abrufen: listing_id="2937345678"
-            - Nach Suche: Nutze die "adid" aus search_listings Ergebnissen
+        Examples:
+            - Get details: listing_id="2937345678"
+            - After search: Use the "adid" from search_listings results
         """
         return await _get_listing_details_impl(listing_id)
     
@@ -89,37 +89,37 @@ def register_listing_tools_manual(server):
         return [
             Tool(
                 name="search_listings",
-                description="""Durchsuche eBay Kleinanzeigen (kleinanzeigen.de) nach Artikeln mit Filtern.
+                description="""Search eBay Kleinanzeigen (kleinanzeigen.de) for items with filters.
         
-WICHTIG: Dies ist dein einziger Zugriff auf eBay Kleinanzeigen / kleinanzeigen.de!
-Nutze dieses Tool für ALLE Suchanfragen nach lokalen Angeboten, gebrauchten Artikeln,
-oder Kleinanzeigen in Deutschland.""",
+IMPORTANT: This is your ONLY access to eBay Kleinanzeigen / kleinanzeigen.de!
+Use this tool for ALL search queries for local offers, used items,
+or classified ads in Germany.""",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "Suchbegriffe für den Artikel (z.B. 'stereo lautsprecher', 'heimkino', 'fahrrad', 'laptop')"
+                            "description": "Search terms for the item (e.g., 'stereo speakers', 'home theater', 'bicycle', 'laptop')"
                         },
                         "location": {
                             "type": "string",
-                            "description": "Postleitzahl oder Ort (z.B. '78464', 'Konstanz', '79206', 'Berlin')"
+                            "description": "Postal code or city (e.g., '78464', 'Constance', '79206', 'Berlin')"
                         },
                         "radius": {
                             "type": "integer",
-                            "description": "Suchradius in Kilometern um den Standort (z.B. 5, 10, 20, 50)"
+                            "description": "Search radius in kilometers around location (e.g., 5, 10, 20, 50)"
                         },
                         "min_price": {
                             "type": "integer",
-                            "description": "Mindestpreis in EUR (z.B. 50)"
+                            "description": "Minimum price in EUR (e.g., 50)"
                         },
                         "max_price": {
                             "type": "integer",
-                            "description": "Höchstpreis in EUR (z.B. 500)"
+                            "description": "Maximum price in EUR (e.g., 500)"
                         },
                         "page_count": {
                             "type": "integer",
-                            "description": "Anzahl der Ergebnisseiten (1-20, Standard: 1)",
+                            "description": "Number of result pages to fetch (1-20, default: 1)",
                             "default": 1
                         }
                     }
@@ -127,17 +127,17 @@ oder Kleinanzeigen in Deutschland.""",
             ),
             Tool(
                 name="get_listing_details",
-                description="""Hole vollständige Details zu einem eBay Kleinanzeigen Inserat.
+                description="""Get complete details for an eBay Kleinanzeigen listing.
         
-Nutze dieses Tool nach search_listings, um alle Informationen zu einem
-bestimmten Artikel zu erhalten: komplette Beschreibung, alle Bilder,
-Verkäufer-Info und technische Details.""",
+Use this tool after search_listings to get all information for a
+specific item: complete description, all images,
+seller info and technical details.""",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "listing_id": {
                             "type": "string",
-                            "description": "Die eindeutige Inserat-ID aus den Suchergebnissen (z.B. '2937345678')"
+                            "description": "The unique listing ID from search results (e.g., '2937345678')"
                         }
                     },
                     "required": ["listing_id"]

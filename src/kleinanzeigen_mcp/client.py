@@ -130,7 +130,7 @@ class KleinanzeigenClient:
                 
                 page_results = await self._extract_listings_from_page(page)
                 
-                # Prüfen, ob wirklich neue Inserate dabei sind
+                # Check if there are actually new listings
                 new_results = []
                 for item in page_results:
                     if item.adid not in seen_adids:
@@ -139,12 +139,12 @@ class KleinanzeigenClient:
                 
                 results.extend(new_results)
                 
-                # Schleife abbrechen, wenn die Seite keine NEUEN Inserate liefert
+                # Break loop if page yields no NEW listings
                 if not new_results:
                     if page_num == 1:
                         logger.warning("No results found on first page")
                     else:
-                        logger.info(f"Keine neuen Ergebnisse mehr auf Seite {page_num}, beende Suche.")
+                        logger.info(f"No new results on page {page_num}, stopping search.")
                     break
                     
             logger.info(f"Search completed: {len(results)} listings found")
@@ -230,11 +230,11 @@ class KleinanzeigenClient:
             }
             """
             
-            # JS direkt im Browser ausführen
+            # Execute JS directly in browser
             raw_results = await page.evaluate(js_script)
-            logger.info(f"JS Extraktion fand {len(raw_results)} eindeutige Inserate")
+            logger.info(f"JS extraction found {len(raw_results)} unique listings")
             
-            # In saubere Python-Objekte umwandeln
+            # Convert to clean Python objects
             results = []
             for item in raw_results:
                 full_url = item['href'] if item['href'].startswith("http") else f"{self.base_url}{item['href']}"
@@ -362,11 +362,11 @@ class KleinanzeigenClient:
         # Extract images
         images = await page.evaluate(r"""
             () => {
-                // 1. Suche nur im Haupt-Inserat, nicht in "Ähnliche Anzeigen"
+                // 1. Search only in main listing, not in "Similar ads"
                 const selectors = '#viewad-image img, #viewad-product-gallery img, #viewad-slider img, .galleryimage-element img';
                 let imgs = Array.from(document.querySelectorAll(selectors));
                 
-                // Fallback für veränderte Layouts
+                // Fallback for changed layouts
                 if (imgs.length === 0) {
                     const mainContainer = document.querySelector('article') || document.querySelector('#viewad-main');
                     if (mainContainer) {
@@ -382,12 +382,12 @@ class KleinanzeigenClient:
                     if (src && (src.includes('http') || src.startsWith('//')) && src.includes('prod-ads')) {
                         const fullUrl = src.startsWith('//') ? 'https:' + src : src;
                         
-                        // 2. Extrahiere die eindeutige Bild-ID (UUID)
+                        // 2. Extract unique image ID (UUID)
                         const match = fullUrl.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
                         
                         if (match) {
                             const uuid = match[1];
-                            // 3. Fordere das Bild im größtmöglichen Format an ($_59.AUTO)
+                            // 3. Request image in largest format ($_59.AUTO)
                             const largeUrl = fullUrl.replace(/\$_\d+\.AUTO/i, '$_59.AUTO');
                             uniqueImages.set(uuid, largeUrl);
                         }
