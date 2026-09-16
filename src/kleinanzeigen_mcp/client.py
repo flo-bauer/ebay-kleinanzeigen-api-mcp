@@ -109,6 +109,8 @@ class KleinanzeigenClient:
         search_url = self.base_url + search_path + ("?" + urlencode(params) if params else "")
         
         results = []
+        seen_adids = set() # Set zum Speichern der bereits gesehenen IDs
+        
         context = await self.browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
@@ -120,17 +122,29 @@ class KleinanzeigenClient:
                 logger.info(f"Fetching page {page_num}: {current_url}")
                 
                 await page.goto(current_url, timeout=30000, wait_until="domcontentloaded")
-                # Wait for either the listing container or "no results" message
+                # Selector erweitert und Timeout auf 3s reduziert
                 try:
-                    await page.wait_for_selector(".ad-listitem, .l-splitpage--no-results", timeout=10000)
+                    await page.wait_for_selector(".ad-listitem, article, .l-splitpage--no-results", timeout=3000)
                 except Exception as e:
-                    logger.warning(f"Selector wait failed: {e}, continuing anyway")
+                    logger.debug(f"Selector wait timeout, continuing anyway")
                 
                 page_results = await self._extract_listings_from_page(page)
-                results.extend(page_results)
                 
-                if not page_results and page_num == 1:
-                    logger.warning("No results found on first page")
+                # Prüfen, ob wirklich neue Inserate dabei sind
+                new_results = []
+                for item in page_results:
+                    if item.adid not in seen_adids:
+                        seen_adids.add(item.adid)
+                        new_results.append(item)
+                
+                results.extend(new_results)
+                
+                # Schleife abbrechen, wenn die Seite keine NEUEN Inserate liefert
+                if not new_results:
+                    if page_num == 1:
+                        logger.warning("No results found on first page")
+                    else:
+                        logger.info(f"Keine neuen Ergebnisse mehr auf Seite {page_num}, beende Suche.")
                     break
                     
             logger.info(f"Search completed: {len(results)} listings found")
