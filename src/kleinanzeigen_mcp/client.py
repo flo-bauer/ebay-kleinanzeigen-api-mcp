@@ -1,4 +1,5 @@
 """Kleinanzeigen scraping client - centralized interface to the website."""
+import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlencode
@@ -15,7 +16,10 @@ class KleinanzeigenClient:
     Centralized client for interacting with Kleinanzeigen.de.
     Manages browser lifecycle and provides clean API for operations.
     """
-    
+
+    # Upper bound for one detail fetch (goto alone may take up to 30s)
+    DETAIL_TIMEOUT_S = 45
+
     def __init__(self):
         self.base_url = "https://www.kleinanzeigen.de"
         self.playwright = None
@@ -93,7 +97,8 @@ class KleinanzeigenClient:
         if min_price is not None or max_price is not None:
             min_price_str = str(min_price) if min_price is not None else ""
             max_price_str = str(max_price) if max_price is not None else ""
-            price_path = f"/preis:{min_price_str}:{max_price_str}"
+            # "/s-" prefix is required: "/preis:..." makes the site return JSON instead of HTML
+            price_path = f"/s-preis:{min_price_str}:{max_price_str}"
         
         search_path = f"{price_path}/s-seite:{{page}}"
         
@@ -185,11 +190,15 @@ class KleinanzeigenClient:
                             adid = match ? match[0] : 'unknown';
                         }
                         
-                        // Titel finden (Link-Text, H2, oder Notfall-Fallback)
-                        let title = link.innerText.trim();
+                        // Titel finden (Überschrift, erster Link mit Text, oder Notfall-Fallback).
+                        // Im neuen Layout ist der erste Link der Bild-Link ohne Text,
+                        // der Titel steht in <h3><a>.
+                        const heading = el.querySelector('h2, h3');
+                        let title = heading ? heading.innerText.trim() : '';
                         if (!title || title.length < 3) {
-                            const h2 = el.querySelector('h2');
-                            title = h2 ? h2.innerText.trim() : '';
+                            const textLink = Array.from(el.querySelectorAll('a[href*="/s-anzeige/"]'))
+                                .find(a => a.innerText.trim().length >= 3);
+                            title = textLink ? textLink.innerText.trim() : '';
                         }
                         if (!title || title.length < 3) {
                             title = 'Titel unbekannt';
@@ -276,32 +285,53 @@ class KleinanzeigenClient:
             raise DetailFetchError("Browser not initialized. Call start() first.")
         
         url = f"{self.base_url}/s-anzeige/{listing_id}"
-        context = await self.browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        )
-        page = await context.new_page()
-        
-        try:
+        # Some Playwright calls (evaluate, close) have no timeout of their own and
+        # occasionally hang forever, blocking the caller. Bound every step.
+        step = "new_context"
+        context = None
+        page = None
+
+        async def fetch() -> ListingDetails:
+            nonlocal step, context, page
+            context = await self.browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+            step = "new_page"
+            page = await context.new_page()
+
             logger.info(f"Fetching details for listing {listing_id}")
+            step = "goto"
             await page.goto(url, timeout=30000, wait_until="domcontentloaded")
-            
+
             # Wait for view counter (optional, may not appear)
+            step = "wait_for_selector"
             try:
                 await page.wait_for_selector("#viewad-cntr-num", state="visible", timeout=2500)
-            except:
+            except Exception:
                 logger.debug("View counter did not appear")
-            
+
             # Extract all details
+            step = "extract"
             details = await self._extract_listing_details(page)
             logger.info(f"Successfully fetched details for {listing_id}")
             return details
-            
+
+        try:
+            return await asyncio.wait_for(fetch(), timeout=self.DETAIL_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.error(f"Listing {listing_id}: timed out after {self.DETAIL_TIMEOUT_S}s in step '{step}'")
+            raise DetailFetchError(f"Failed to fetch listing {listing_id}: timeout in step '{step}'")
         except Exception as e:
             logger.error(f"Failed to fetch listing details: {e}")
             raise DetailFetchError(f"Failed to fetch listing {listing_id}: {e}")
         finally:
-            await page.close()
-            await context.close()
+            for closable in (page, context):
+                if closable is None:
+                    continue
+                try:
+                    await asyncio.wait_for(closable.close(), timeout=10)
+                except Exception as e:
+                    logger.warning(f"Listing {listing_id}: close failed/hung: {e!r}")
     
     async def _extract_listing_details(self, page: Page) -> ListingDetails:
         """Extract complete listing information from detail page."""

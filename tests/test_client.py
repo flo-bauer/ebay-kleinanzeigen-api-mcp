@@ -76,6 +76,9 @@ async def test_search_with_price_range():
             page_count=1
         )
         assert isinstance(results, list)
+        # A common query with a price filter must return listings; an empty
+        # list means the price URL is wrong (site answers with JSON, not HTML).
+        assert len(results) > 0
 
 
 @pytest.mark.asyncio
